@@ -1,0 +1,12 @@
+name: CI
+on:
+  push: { branches: ["**"] }
+  pull_request:
+
+jobs:
+  ios:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build + test the Swift SDK
+        run: swift build && swift test
