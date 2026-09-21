@@ -45,6 +45,20 @@ public final class CookieMunchConsent: ObservableObject {
     private var listeners: [UUID: (ConsentState) -> Void] = [:]
     private var pendingGates: [ConsentCategory: [() -> Void]] = [:]
 
+    // MARK: Applicable regulation
+
+    /// Set once the server has told us the regime for this person's real location.
+    /// Until then `applicableRegulation` answers from the configured region.
+    private var serverRegulation: Regulation?
+    private var gpc = false
+    private var dnt = false
+
+    /// Who this device's decisions belong to, if the app has said. Deliberately NOT
+    /// persisted with the decision: who is signed in is the app's business and can change
+    /// between launches, so baking a stale account id into a restored record would
+    /// attribute one person's consent to another.
+    private var subjectId: String?
+
     /// - Parameters:
     ///   - cbid: your CookieMunch site id.
     ///   - apiURL: base URL of your CookieMunch API (e.g. `https://cmp.example.com`).
@@ -60,6 +74,7 @@ public final class CookieMunchConsent: ObservableObject {
         transport: ConsentTransport = URLSessionTransport(),
         region: String = "unknown",
         storageKey: String = "CookieMunch",
+        subjectId: String? = nil,
         now: @escaping @Sendable () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) },
         stamp: @escaping @Sendable () -> String = { UUID().uuidString }
     ) {
@@ -69,6 +84,7 @@ public final class CookieMunchConsent: ObservableObject {
         self.transport = transport
         self.region = region
         self.storageKey = storageKey
+        self.subjectId = (subjectId?.isEmpty ?? true) ? nil : subjectId
         self.now = now
         self.stamp = stamp
         self.state = ConsentState(stamp: stamp(), utc: now(), region: region)
@@ -78,6 +94,79 @@ public final class CookieMunchConsent: ObservableObject {
 
     /// The current state (equivalent to reading `state`).
     public func getState() -> ConsentState { state }
+
+    /// Which privacy regime applies to this person: GDPR / CCPA / LGPD, opt-in vs
+    /// opt-out, and which signalling framework third parties will read.
+    ///
+    /// Answers immediately and offline from the region this client was configured with.
+    /// Call `refreshRegulation()` to replace that with the server's IP-derived answer —
+    /// a device's locale tells you where the phone was sold, not where its owner is.
+    public var applicableRegulation: Regulation {
+        serverRegulation ?? Regulation.resolve(region: region, gpc: gpc, dnt: dnt)
+    }
+
+    /// Whether you still owe this person a consent prompt.
+    ///
+    /// False once they have made an explicit decision in the app, and false when an
+    /// opt-out signal has already expressed a refusal on their behalf. Check this
+    /// before presenting a banner: an app that re-prompts someone who already answered
+    /// is both annoying and, under an opt-out regime, wrong.
+    public var isConsentRequired: Bool {
+        !state.hasResponse && applicableRegulation.consentRequired
+    }
+
+    /// Record a Global Privacy Control signal. Under an opt-out regime this counts as
+    /// a refusal on this person's behalf, so no prompt is owed; under GDPR nothing
+    /// fires before consent anyway, so the prompt still is.
+    public func setGlobalPrivacyControl(_ enabled: Bool) {
+        gpc = enabled
+        serverRegulation = nil // the local resolver now has newer information than the server
+    }
+
+    /// Record a legacy Do Not Track signal. Treated exactly like GPC.
+    public func setDoNotTrack(_ enabled: Bool) {
+        dnt = enabled
+        serverRegulation = nil
+    }
+
+    // MARK: Cross-surface identity
+
+    /// The account id currently attached to this device's decisions, if any.
+    public var currentSubjectId: String? { subjectId }
+
+    /// Attach this device's decisions to a signed-in account, so one person's consent can
+    /// be correlated across web, iOS, Android and desktop (`GET /v1/subjects/:id/consent`).
+    ///
+    /// Call it after sign-in rather than at construction: an app builds its consent client
+    /// at launch, before anyone has signed in. Pass `nil` on sign-out — continuing to send
+    /// the id would attribute the next person's decisions on a shared device to the
+    /// account that just left.
+    ///
+    /// The id is opaque to us: stored and bound into the tamper-evident hash chain, never
+    /// interpreted. It applies to decisions made from now on; it does not rewrite history.
+    public func setSubjectId(_ id: String?) {
+        subjectId = (id?.isEmpty ?? true) ? nil : id
+    }
+
+    /// Ask the server which regime applies, based on the IP it sees, and adopt the
+    /// answer. Never throws: offline, or against a server too old to return a
+    /// `regulation` block, the locally-resolved regime stays in place — a failed
+    /// refresh must never leave the app with no answer to "do I prompt".
+    public func refreshRegulation() async {
+        guard let url = URL(string: "\(apiURL)/config/\(cbid)") else { return }
+        do {
+            let data = try await transport.get(url, headers: [
+                "Accept": "application/json",
+                "X-CookieMunch-Region": region,
+            ])
+            struct ConfigEnvelope: Decodable { let regulation: Regulation? }
+            if let resolved = try JSONDecoder().decode(ConfigEnvelope.self, from: data).regulation {
+                serverRegulation = resolved
+            }
+        } catch {
+            // Offline, malformed, or a transport with no `get`. Keep the local answer.
+        }
+    }
 
     /// True once the user has made an explicit decision.
     public var hasResponse: Bool { state.hasResponse }
@@ -210,6 +299,9 @@ public final class CookieMunchConsent: ObservableObject {
         let ver: Int
         let utc: Int64
         let url: String
+        // Omitted from the JSON entirely when nil, so a decision made while logged out is
+        // byte-identical to one from a build that never had this field.
+        let subjectId: String?
     }
 
     /// POST the decision to `POST /api/v1/consent`. Never throws: an offline device keeps
@@ -223,7 +315,8 @@ public final class CookieMunchConsent: ObservableObject {
             method: state.method.rawValue,
             ver: state.ver,
             utc: state.utc,
-            url: "app://\(cbid)"
+            url: "app://\(cbid)",
+            subjectId: subjectId
         )
         guard let body = try? JSONEncoder().encode(payload) else { return }
         let headers = [
