@@ -1,6 +1,6 @@
 # CookieMunch iOS SDK
 
-The native Swift SDK for [Cookie Munch](../../README.md) — a self-hosted Consent
+The native Swift SDK for [Cookie Munch](../../README.md) — a Consent
 Management Platform. It gives your iOS/macOS/tvOS/watchOS app the same consent model as
 the web embed and the React Native SDK: the four standard categories, an implied default
 until the user chooses, offline-safe sync to your CookieMunch API, and a `gate` helper
