@@ -35,7 +35,7 @@ import CookieMunch
 // Persist the record in the Keychain (see "Keychain note" below).
 let consent = CookieMunchConsent(
     cbid: "your-site-id",
-    apiURL: "https://cmp.example.com",
+    apiURL: "https://api.cookiemunch.net",
     storage: KeychainConsentStorage(),
     region: "EU"                       // sent as the X-CookieMunch-Region header
 )
@@ -62,7 +62,7 @@ re-synced on next launch. A consent decision is never lost to a bad network.
 struct RootView: View {
     @StateObject private var consent = CookieMunchConsent(
         cbid: "your-site-id",
-        apiURL: "https://cmp.example.com",
+        apiURL: "https://api.cookiemunch.net",
         storage: KeychainConsentStorage()
     )
 

@@ -20,7 +20,11 @@ public struct ConsentBannerView: View {
     }
 
     private var background: Color {
-        #if canImport(UIKit)
+        #if os(tvOS) || os(watchOS)
+        // Neither has systemBackground. The package declared both platforms but compiled
+        // for neither until this branch existed.
+        return Color(white: 0.12)
+        #elseif canImport(UIKit)
         return Color(.systemBackground)
         #elseif canImport(AppKit)
         return Color(nsColor: .windowBackgroundColor)
@@ -30,6 +34,17 @@ public struct ConsentBannerView: View {
     }
 
     public var body: some View {
+        #if os(tvOS)
+        if !consent.state.hasResponse {
+            TVConsentCard(consent: consent, background: background)
+        }
+        #else
+        phoneBody
+        #endif
+    }
+
+    @ViewBuilder
+    private var phoneBody: some View {
         if !consent.state.hasResponse {
             VStack(alignment: .leading, spacing: 12) {
                 Text("We value your privacy")
@@ -57,4 +72,44 @@ public struct ConsentBannerView: View {
         }
     }
 }
+
+#if os(tvOS)
+/// The consent prompt on a television.
+///
+/// A TV is read from across a room and driven by a remote that can only move focus and
+/// press. So: a centred card, not a strip along the bottom; type sized for ten feet; and
+/// buttons in the system style, because tvOS draws focus (lift, shadow, highlight) only
+/// on buttons it styles itself — the phone banner's custom backgrounds hid which button
+/// the remote was on. The two choices are the same size and weight, and focus starts on
+/// the first in reading order rather than being steered toward "Allow all".
+@available(tvOS 15, *)
+struct TVConsentCard: View {
+    @ObservedObject var consent: CookieMunchConsent
+    let background: Color
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.6).ignoresSafeArea()
+            VStack(alignment: .leading, spacing: 28) {
+                Text("We value your privacy")
+                    .font(.title2.weight(.semibold))
+                Text("We use cookies and similar technologies to improve your experience. You decide what we use.")
+                    .font(.body)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 40) {
+                    Button("Reject all") { Task { await consent.decline() } }
+                    Button("Allow all") { Task { await consent.accept() } }
+                }
+                .focusSection()
+            }
+            .padding(60)
+            .frame(maxWidth: 1100)
+            .background(background)
+            .cornerRadius(24)
+        }
+        .accessibilityAddTraits(.isModal)
+    }
+}
+#endif
 #endif
