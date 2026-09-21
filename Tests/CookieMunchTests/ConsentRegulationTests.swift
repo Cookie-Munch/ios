@@ -140,3 +140,34 @@ final class ConsentRegulationTests: XCTestCase {
         XCTAssertTrue(client.applicableRegulation.gdprApplies)
     }
 }
+
+/// Around twenty US states now have comprehensive privacy laws that differ on what a
+/// consent UI must do. Only the server can say which one applies — a device's locale is a
+/// country at best — so the SDK reads it from the config rather than guessing.
+final class UsStateLawTests: XCTestCase {
+    func testDecodesTheStateLawTheServerResolved() throws {
+        let json = """
+        {"region":"us-tx","class":"us","regulations":{"gdprApplies":false,"ccpaApplies":true,"lgpdApplies":false},
+         "model":"opt-out","defaultState":"granted","framework":"gpp","forcedOptOut":false,"consentRequired":true,
+         "stateLaw":{"id":"tdpsa","state":"TX","name":"Texas Data Privacy and Security Act",
+         "universalOptOut":true,"universalOptOutInForce":true,"sensitiveOptIn":true,"minorOptInUnder":13}}
+        """.data(using: .utf8)!
+        let reg = try JSONDecoder().decode(Regulation.self, from: json)
+        XCTAssertEqual(reg.stateLaw?.id, "tdpsa")
+        XCTAssertEqual(reg.stateLaw?.state, "TX")
+        XCTAssertTrue(reg.stateLaw?.sensitiveOptIn ?? false)
+        XCTAssertEqual(reg.stateLaw?.minorOptInUnder, 13)
+    }
+
+    func testIsAbsentWhenTheServerNamedNoStateLaw() throws {
+        let json = """
+        {"region":"de","class":"eu","regulations":{"gdprApplies":true,"ccpaApplies":false,"lgpdApplies":false},
+         "model":"opt-in","defaultState":"denied","framework":"tcf","forcedOptOut":false,"consentRequired":true}
+        """.data(using: .utf8)!
+        XCTAssertNil(try JSONDecoder().decode(Regulation.self, from: json).stateLaw)
+    }
+
+    func testLocalResolutionDoesNotInventOne() {
+        XCTAssertNil(Regulation.resolve(region: "us-tx").stateLaw)
+    }
+}

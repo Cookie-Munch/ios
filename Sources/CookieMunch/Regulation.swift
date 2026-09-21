@@ -53,6 +53,67 @@ public struct Regulation: Codable, Equatable, Sendable {
     /// Whether a decision still has to be collected. See `CookieMunchConsent.isConsentRequired`,
     /// which also accounts for a decision this person already made in the app.
     public let consentRequired: Bool
+    /// The US state law governing this person, when the server resolved one.
+    ///
+    /// Around twenty states now have comprehensive laws and they differ on what a consent
+    /// UI must do. Only the server can say which applies — a device's locale gives a
+    /// country at best, never a state — so this is nil when the regime was resolved on
+    /// device, and populated from `/config/:cbid`.
+    public let stateLaw: UsStateLaw?
+
+    /// One US state privacy law, as the server resolved it.
+    public struct UsStateLaw: Codable, Equatable, Sendable {
+        /// Stable id, e.g. `"tdpsa"`.
+        public let id: String
+        /// Two-letter state code.
+        public let state: String
+        public let name: String
+        /// The law requires honouring a universal opt-out signal.
+        public let universalOptOut: Bool
+        /// Sensitive data needs opt-in consent rather than an opt-out.
+        public let sensitiveOptIn: Bool
+        /// Opt-in required below this age for sale / targeted advertising; 0 = no rule.
+        public let minorOptInUnder: Int
+
+        private enum CodingKeys: String, CodingKey {
+            case id, state, name, sensitiveOptIn, minorOptInUnder
+            case universalOptOut, universalOptOutInForce
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decode(String.self, forKey: .id)
+            state = try c.decode(String.self, forKey: .state)
+            name = (try? c.decode(String.self, forKey: .name)) ?? id
+            // Prefer whether the duty is actually in force; fall back to whether the law
+            // mandates it at all, for a server that predates the distinction.
+            universalOptOut = (try? c.decode(Bool.self, forKey: .universalOptOutInForce))
+                ?? (try? c.decode(Bool.self, forKey: .universalOptOut)) ?? false
+            sensitiveOptIn = (try? c.decode(Bool.self, forKey: .sensitiveOptIn)) ?? false
+            minorOptInUnder = (try? c.decode(Int.self, forKey: .minorOptInUnder)) ?? 0
+        }
+
+        /// Encoded back with the in-force spelling, so a round trip through the SDK
+        /// keeps the meaning the server sent rather than the looser `universalOptOut`.
+        public func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(id, forKey: .id)
+            try c.encode(state, forKey: .state)
+            try c.encode(name, forKey: .name)
+            try c.encode(universalOptOut, forKey: .universalOptOutInForce)
+            try c.encode(sensitiveOptIn, forKey: .sensitiveOptIn)
+            try c.encode(minorOptInUnder, forKey: .minorOptInUnder)
+        }
+
+        public init(id: String, state: String, name: String, universalOptOut: Bool, sensitiveOptIn: Bool, minorOptInUnder: Int) {
+            self.id = id
+            self.state = state
+            self.name = name
+            self.universalOptOut = universalOptOut
+            self.sensitiveOptIn = sensitiveOptIn
+            self.minorOptInUnder = minorOptInUnder
+        }
+    }
 
     // Convenience accessors — `reg.gdprApplies` reads better than `reg.regulations.gdprApplies`
     // at the call site, which is almost always a single `if`.
@@ -64,7 +125,7 @@ public struct Regulation: Codable, Equatable, Sendable {
 
     // `class` is a Swift keyword, so the wire name is mapped rather than inferred.
     private enum CodingKeys: String, CodingKey {
-        case region, regulations, model, defaultState, framework, forcedOptOut, consentRequired
+        case region, regulations, model, defaultState, framework, forcedOptOut, consentRequired, stateLaw
         case regionClass = "class"
     }
 
@@ -81,6 +142,7 @@ public struct Regulation: Codable, Equatable, Sendable {
         model = Model(rawValue: try c.decode(String.self, forKey: .model)) ?? .optIn
         defaultState = DefaultState(rawValue: try c.decode(String.self, forKey: .defaultState)) ?? .denied
         framework = Framework(rawValue: try c.decode(String.self, forKey: .framework)) ?? .none
+        stateLaw = try? c.decodeIfPresent(UsStateLaw.self, forKey: .stateLaw)
     }
 
     public init(
@@ -91,7 +153,8 @@ public struct Regulation: Codable, Equatable, Sendable {
         defaultState: DefaultState,
         framework: Framework,
         forcedOptOut: Bool,
-        consentRequired: Bool
+        consentRequired: Bool,
+        stateLaw: UsStateLaw? = nil
     ) {
         self.region = region
         self.regionClass = regionClass
@@ -101,6 +164,7 @@ public struct Regulation: Codable, Equatable, Sendable {
         self.framework = framework
         self.forcedOptOut = forcedOptOut
         self.consentRequired = consentRequired
+        self.stateLaw = stateLaw
     }
 
     // MARK: Resolution
