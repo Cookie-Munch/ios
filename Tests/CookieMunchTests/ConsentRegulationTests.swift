@@ -111,7 +111,10 @@ final class ConsentRegulationTests: XCTestCase {
         await client.refreshRegulation()
 
         let urls = await transport.requested()
-        XCTAssertEqual(urls.first?.absoluteString, "https://cmp.example.com/config/test-cbid")
+        // The same call also asks for this device's language, so the response carries the
+        // banner's words as well as the regime.
+        XCTAssertEqual(urls.first?.absoluteString.split(separator: "?").first.map(String.init), "https://cmp.example.com/config/test-cbid")
+        XCTAssertTrue(urls.first?.query?.hasPrefix("lang=") == true)
         let headers = await transport.headers()
         XCTAssertEqual(headers.first?["X-CookieMunch-Region"], "fr")
     }

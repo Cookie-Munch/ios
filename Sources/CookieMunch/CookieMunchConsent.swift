@@ -50,6 +50,11 @@ public final class CookieMunchConsent: ObservableObject {
     /// Set once the server has told us the regime for this person's real location.
     /// Until then `applicableRegulation` answers from the configured region.
     private var serverRegulation: Regulation?
+
+    /// The banner's words in this device's language, once the server has answered.
+    /// Nil until `refreshRegulation()` runs — the views fall back to English, so an app
+    /// that has never reached the network still asks the question.
+    @Published public private(set) var copy: LocalizedCopy?
     private var gpc = false
     private var dnt = false
 
@@ -153,15 +158,27 @@ public final class CookieMunchConsent: ObservableObject {
     /// `regulation` block, the locally-resolved regime stays in place — a failed
     /// refresh must never leave the app with no answer to "do I prompt".
     public func refreshRegulation() async {
-        guard let url = URL(string: "\(apiURL)/config/\(cbid)") else { return }
+        // `lang` asks for this device's language; the same call brings back the regime and
+        // the banner's words, so a client never carries forty catalogues of its own.
+        let language = LocalizedCopy.preferredLanguage
+        let query = language.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? language
+        guard let url = URL(string: "\(apiURL)/config/\(cbid)?lang=\(query)") else { return }
         do {
             let data = try await transport.get(url, headers: [
                 "Accept": "application/json",
+                "Accept-Language": language,
                 "X-CookieMunch-Region": region,
             ])
-            struct ConfigEnvelope: Decodable { let regulation: Regulation? }
-            if let resolved = try JSONDecoder().decode(ConfigEnvelope.self, from: data).regulation {
+            struct ConfigEnvelope: Decodable {
+                let regulation: Regulation?
+                let copy: LocalizedCopy?
+            }
+            let envelope = try JSONDecoder().decode(ConfigEnvelope.self, from: data)
+            if let resolved = envelope.regulation {
                 serverRegulation = resolved
+            }
+            if let resolved = envelope.copy {
+                copy = resolved
             }
         } catch {
             // Offline, malformed, or a transport with no `get`. Keep the local answer.

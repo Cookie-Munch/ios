@@ -19,6 +19,25 @@ public struct ConsentBannerView: View {
         self.consent = consent
     }
 
+    /// The copy to draw: the server's answer for this device's language when it has
+    /// arrived, and the English fallback until then — a prompt that waits for the network
+    /// is a prompt that does not ask.
+    private var text: (title: String, body: String, accept: String, reject: String) {
+        let copy = consent.copy?.banner
+        return (
+            copy?.title ?? "We value your privacy",
+            copy?.body ?? "We use cookies and similar technologies to improve your experience. You decide what we use.",
+            copy?.acceptAll ?? "Allow all",
+            copy?.rejectAll ?? "Reject all"
+        )
+    }
+
+    /// Right-to-left copy laid out left-to-right puts the buttons on the wrong side of a
+    /// sentence the reader scans the other way.
+    private var layoutDirection: LayoutDirection {
+        consent.copy?.rtl == true ? .rightToLeft : .leftToRight
+    }
+
     private var background: Color {
         #if os(tvOS) || os(watchOS)
         // Neither has systemBackground. The package declared both platforms but compiled
@@ -36,7 +55,8 @@ public struct ConsentBannerView: View {
     public var body: some View {
         #if os(tvOS)
         if !consent.state.hasResponse {
-            TVConsentCard(consent: consent, background: background)
+            TVConsentCard(consent: consent, background: background, text: text)
+                .environment(\.layoutDirection, layoutDirection)
         }
         #else
         phoneBody
@@ -47,17 +67,17 @@ public struct ConsentBannerView: View {
     private var phoneBody: some View {
         if !consent.state.hasResponse {
             VStack(alignment: .leading, spacing: 12) {
-                Text("We value your privacy")
+                Text(text.title)
                     .font(.headline)
-                Text("We use cookies and similar technologies to improve your experience. You decide what we use.")
+                Text(text.body)
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                 HStack(spacing: 8) {
-                    Button("Reject all") { Task { await consent.decline() } }
+                    Button(text.reject) { Task { await consent.decline() } }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(white: 0.8)))
-                    Button("Allow all") { Task { await consent.accept() } }
+                    Button(text.accept) { Task { await consent.accept() } }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
                         .background(Color(red: 0.055, green: 0.43, blue: 0.36))
@@ -68,6 +88,7 @@ public struct ConsentBannerView: View {
             .padding(20)
             .background(background)
             .overlay(Rectangle().frame(height: 1).foregroundColor(Color(white: 0.88)), alignment: .top)
+            .environment(\.layoutDirection, layoutDirection)
             .accessibilityAddTraits(.isModal)
         }
     }
@@ -86,20 +107,21 @@ public struct ConsentBannerView: View {
 struct TVConsentCard: View {
     @ObservedObject var consent: CookieMunchConsent
     let background: Color
+    let text: (title: String, body: String, accept: String, reject: String)
 
     var body: some View {
         ZStack {
             Color.black.opacity(0.6).ignoresSafeArea()
             VStack(alignment: .leading, spacing: 28) {
-                Text("We value your privacy")
+                Text(text.title)
                     .font(.title2.weight(.semibold))
-                Text("We use cookies and similar technologies to improve your experience. You decide what we use.")
+                Text(text.body)
                     .font(.body)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 40) {
-                    Button("Reject all") { Task { await consent.decline() } }
-                    Button("Allow all") { Task { await consent.accept() } }
+                    Button(text.reject) { Task { await consent.decline() } }
+                    Button(text.accept) { Task { await consent.accept() } }
                 }
                 .focusSection()
             }
