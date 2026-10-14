@@ -26,7 +26,7 @@ public struct ConsentBannerView: View {
         let copy = consent.copy?.banner
         return (
             copy?.title ?? "We value your privacy",
-            copy?.body ?? "We use cookies and similar technologies to improve your experience. You decide what we use.",
+            copy?.body ?? "We use cookies. Choose which ones you allow.",
             copy?.acceptAll ?? "Allow all",
             copy?.rejectAll ?? "Reject all"
         )

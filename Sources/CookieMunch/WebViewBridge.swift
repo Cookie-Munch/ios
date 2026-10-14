@@ -68,7 +68,8 @@ public enum WebViewBridge {
     }
 
     /// A URL parameter carrying this decision, for when script injection is unavailable.
-    /// Append it to the URL you are about to load.
+    /// Append it to the URL you are about to load. The page ignores it unless the site has
+    /// `webview.urlConsent` enabled (off by default); prefer `javaScript(for:)`.
     public static func queryString(for state: ConsentState) -> String {
         guard let value = serialize(state) else { return "" }
         var allowed = CharacterSet.alphanumerics
